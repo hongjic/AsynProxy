@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Project - cs146a - Spring 2013</title>
+  <link rel="stylesheet" type="text/css" href="../main.css" />
+</head>
+<body class="single-column">
+  <h1>cs146a Project : TCP Proxy Server</h1>
+  
+  <div id="due-date">
+    <span class="name">Due:</span> March 3, 2017 (Friday) by 11:55pm
+  </div>
+
+  <div id="project-meta">
+    <p>
+      This project must be written in C and must compile (with gcc)
+      and run on one of the iMacs in the Vertica Lounge. (<a
+      href="http://www.cs.brandeis.edu/~guru/public_work_stations.html">click
+      here for a list of available machines</a>).
+    </p>
+    <p>
+      You must include a Makefile for compiling from the command line
+      (you are free to use an IDE during development but your grader
+      will expect to type `make tcpproxy` to build your project).
+    </p>
+    <p>
+      Also you must include a README file that contains a description of your implementation 
+      and any issues your code might have. This is an individual project and all 
+      submitted work must be your own. To this effect, to receive any credit, you will
+      have to include in your README a statement, attesting the submitted work is yours. 
+      So while you are allowed to discuss your solution with other students, 
+      make sure you do not share your code. If you have extensive discussions with another 
+      student, please indicate this in your README file.
+    </p>
+  </div>
+
+  <h2>Introduction</h2>
+
+  <p>
+    The project this semester will be the design, development, and
+    performance testing of a proxy server. We will accomplish this
+    in multiple stages (called <strong>milestones</strong>). In this
+    first milestone, you will implement a simple, single-threaded
+    server that can proxy any TCP/IP communication from one remote
+    client to one remote host/server. You will use non-blocking socket
+    communication and the basic C skills described in the tutorial.
+  </p>
+
+  <p>
+    Your TCP proxy server will allow remote clients to communicate with a
+    single remote host/server as though the proxy server were that
+    server. Sometimes this can be used to get around security
+    restrictions (since it can make a client appear to originate from
+    a different network). There are less nefarious uses for proxy servers like caching server
+    responses to improve performance, but for now we will just discuss
+    the technical details of what it means to be a proxy server.
+  </p>
+
+  <p>
+    Say that a client on remote host <b>C</b> wants to communicate
+    with a server on remote host <b>S</b>. Once a TCP socket
+    is established between <b>C</b> and <b>S</b>, <b>C</b> can send
+    requests to <b>S</b>, and <b>S</b> can respond. The communication
+    channel is bidirectional, meaning that both hosts can be sending
+    at the same time.
+  </p>
+
+  <p style="text-align:center"><img src="client2server.png" /></p>
+
+  <p>
+    The introduction of a TCP proxy server <b>P</b> that is configured to act as
+    a proxy for <b>S</b> means that <b>C</b> can communicate with <b>S</b>
+    <em>by connecting to <b>P</b></em>. <b>S</b> will think that it is
+    communicating with <b>P</b>, effectively hiding the existence of
+    <b>C</b>.
+  </p>
+
+  <p style="text-align:center"><img src="client2proxy.png" /></p>
+
+  <p>
+    This also hides the existence of the server from the client, and
+    so this kind of proxy is sometimes used as a sort of gateway
+    between clients outside a network and servers inside the network.
+  </p>
+
+  <h2>Basic Requirements</h2>
+
+  <h3>Non-blocking operation</h3>
+
+  <p>
+    Your proxy server (P above) must avoid blocking on a socket which will not
+    produce output. This means that you must check both the client and
+    server sockets for their ready state before attempting a <span
+    class="code">read</span> or <span class="code">write</span>.
+  </p>
+
+  <h3>Memory consumption</h3>
+
+  <p>
+    Your proxy server must use fixed-size buffers between the client
+    and server. This means that your server can proxy requests and
+    responses of any size without consuming unbounded resources on the
+    machine where the server is running.
+  </p>
+
+  <h3>Serving clients</h3>
+
+  <p>
+    Your proxy server will serve only one client at a time. 
+    An industrial strength proxy server needs to serve an
+    arbitrary number of simultaneous clients. 
+    You may want to consider what would it take to do this.
+  </p>
+
+  <h3>Invoking your TCP proxy server</h3>
+
+  <p>
+    Your proxy program should be called <strong
+    class="code">tcpproxy</strong>. It should accept the following
+    positional arguments on the command line when it is invoked:
+  </p>
+
+  <ol class="code">
+    <li>remote_host</li>
+    <li>remote_port</li>
+    <li>proxy_server_port</li>
+  </ol>
+
+  <p>
+    Your proxy server will listen for incoming connections from clients on <span
+    class="code">proxy_server_port</span>. After accepting a new client,
+    your proxy server will open a new connection to <span
+    class="code">remote_host</span> using <span
+    class="code">remote_port</span>, and proxy communications between
+    the remote host and remote client.
+  </p>
+
+  <p>
+    Here is an example of invoking <strong
+    class="code">tcpproxy</strong> to listen for incoming clients on
+    port <span class="code">8000</span> and to proxy those clients to
+    the web server <span class="code">www.brandeis.edu</span> over
+    port <span class="code">80</span> (the standard <span
+    class="code">HTTP</span> port):
+  </p>
+
+  <pre class="command">./tcpproxy www.brandeis.edu 80 8000</pre>
+
+  <p style="text-align:center"><img src="example.png" /></p>
+
+  <p>
+    When invoked with no arguments or incorrect arguments, <strong
+    class="code">tcpproxy</strong> should output usage instructions:
+  </p>
+
+  <pre class="output">Usage: tcpproxy remote_host remote_port proxy_server_port</pre>
+
+  <h2>Design</h2>
+
+  <h3>Proxy Server loop design</h3>
+
+  <ul>
+    <li>Open a socket which listens for new connections</li>
+    <li>In an infinite loop, accept incoming client connections</li>
+    <li>When a new client arrives, open a <em>new</em> connection to the remote host</li>
+    <li>Proxy between the remote client and remote host until they terminate their connections</li>
+  </ul>
+
+  <h3>Short writes</h3>
+
+  <p>
+    When you attempt to <span class="code">read</span> from a socket
+    into a buffer, or <span class="code">write</span> from a buffer
+    into a socket, the operating system may not read or write all the
+    bytes you requested. This often happens with <span
+    class="code">read</span>, because there may simply not be enough
+    data left in server's response to fill up the entire buffer you
+    provided. However, it can <em>also</em> happen with <span
+    class="code">write</span>! When the operating system writes fewer
+    bytes than you requested, it is called a <em>short write</em>.
+  </p>
+
+  <p>
+    You can detect a short write by comparing the number of bytes
+    written by <span class="code">write</span> to the number of bytes
+    you requested to be written. The number of bytes actually written
+    is the return value from write. The following code can detect both
+    errors and short writes (but doesn't tell you what to do with
+    them!)
+  </p>
+
+  <pre class="code">if((n = write(fd, buf, used)) &lt; 0) {
+    // error!
+} else if(n &lt; used) {
+    // the operating system couldn't write all the bytes we asked it to!
+}</pre>
+
+  <p>
+    It is up to you to figure out how to solve the short writes problem.
+  </p>
+
+  <h3>Asynchronous I/O</h3>
+
+  <p>
+    The remote client and remote server of your TCP proxy server may at some
+    point itself block, waiting for data from the other remote
+    host. Since your TCP proxy server does not have knowledge of the
+    application-level protocol being followed by the remote hosts, it
+    is possible for a <span class="code">read</span> from one of the
+    hosts to block indefinitely (if that host is itself waiting for
+    more data before it sends again). Using asynchronous I/O solves
+    this problem, because it allows your proxy server to read and write from
+    ready sockets, and to only block when there is no I/O to do.
+  </p>
+
+  <p>
+    You will use <strong class="code">select</strong> or <strong
+    class="code">poll</strong> to accomplish asynchrony. A
+    comprehensive discussion of <strong class="code">select</strong>
+    is given in <a
+    href="http://pages.cs.brandeis.edu/~cs146a/tutorials/net2.pdf">this
+    handout</a>. You can also read how to use them in their respective
+    man pages (<span class="command">man 2 select</span> and <span
+    class="command">man 2 poll</span>).
+  </p>
+
+  <p>
+    We recommend you use <span class="code">select</span> unless you
+    are familiar with how to read and understand APIs, since you have
+    more documentation on <span class="code">select</span> at your
+    disposal. The benefit of using <span class="code">poll</span>, if
+    you choose to use it, is that it has a slightly more convenient and
+    efficient interface for this particular problem (non-blocking I/O
+    with a small number of sockets).
+  </p>
+  
+  <p>
+    The purpose of <span class="code">select</span> and <span
+    class="code">poll</span> is to block until at least one of a set
+    of sockets (represented by file descriptors) is ready for
+    I/O. Once at least one socket is ready, you are given a data
+    structure to search that tells you which sockets are ready. You
+    can then perform <span class="code">read</span> and <span
+    class="code">write</span> without the danger of blocking
+    indefinitely.
+  </p>
+
+  <h3>Managing buffers</h3>
+
+  <p>
+    You must use fixed-size buffers for proxying between the two
+    remote hosts. This means that you cannot necessarily allocate a
+    buffer that is large enough to hold an entire request or
+    response. Also, if one of the remote hosts (either the client or
+    the server) is significantly faster than the other remote host,
+    then you may run into a situation where you need to write into a
+    buffer that is still partially-filled from a previous read (i.e.,
+    because of short writes).
+  </p>
+
+  <p>
+    One way for your proxy server to handle this is to read from one host
+    (host A) into a buffer, then write the entirety of that buffer to
+    the other host (host B) before reading again from host A (taking
+    care to handle short writes appropriately). This approach is
+    acceptable for this milestone.
+  </p>
+
+  <p>
+    The way this problem is often solved in industrial strength code
+    is to use a <a
+    href="https://secure.wikimedia.org/wikipedia/en/wiki/Circular_buffer">circular
+    buffer</a> (also called a &quot;ring buffer&quot;). In a circular
+    buffer, you can call read from the head of the buffer and write to
+    the tail of the buffer, wrapping around the edges of the memory
+    allocated to the buffer as though it were a single continuous
+    ring. This greatly simplifies the process of managing the buffer
+    space. However, circular buffers are very tricky to implement and
+    test. This project does not require a circular buffer; but, a
+    future project might. So, if you want to try
+     implementing a circular buffer you can get feedback on it as
+    part of this project.
+  </p>
+
+  <h2>Sample code</h2>
+  
+  <h3>From tutorial</h3>
+
+  <p>
+    Refer to the code provided as part of the tutorial, as well as the
+    very useful handout also linked on the tutorial page.
+  </p>
+
+  <ul>
+    <li><a href="../tutorials/">Go to the tutorials page</a></li>
+  </ul>
+
+  <h3>Making sockets asynchronous</h3>
+
+  <p>
+    Here is a sample function to make any open socket ready for
+    asynchronous I/O (you need to call this on sockets you want to use
+    with <span class="code">select</span> or <span
+    class="code">poll</span>):
+  </p>
+
+  <pre class="code">int make_async(int s) {
+    int n;
+
+    if((n = fcntl(s, F_GETFL)) == -1 || fcntl(s, F_SETFL, n | O_NONBLOCK) == -1)
+        perr("fcntl");
+    n = 1;
+    if(setsockopt(s, SOL_SOCKET, SO_KEEPALIVE, &amp;n, sizeof(n)) == -1)
+        perr("setsockopt");
+
+    return 0;
+  err:
+    return -1;
+}</pre>
+
+  <h3><span class="code">select</span> and <span class="code">poll</span></h3>
+
+  <p>
+    To call <span class="code">select</span>, you initialize two <span
+    class="code">fd_set</span>s which list the sockets that you would
+    like to read from or write to, and then loop over those arrays to
+    find sockets which are ready for reading or writing. Essentially,
+    you specify <em>intent</em> in the input arrays, and <span
+    class="code">select</span> updates those arrays with socket ready
+    states. You will want to adapt the following code into a utility
+    library to make managing asynchrony easy (use this for
+    inspiration, don't copy and paste it into your program).
+  </p>
+
+  <pre class="code">int fd, n_ready;
+fd_set r_ready, w_ready;
+FD_ZERO(&amp;r_ready);
+FD_ZERO(&amp;w_ready);
+
+// Set intent to read and write for the remote client and remote server
+// if and only if you have data to write or free space in a buffer into
+// which to read. If your program doesn't intend to do a particular I/O
+// with a socket, don't FD_SET that intent in r_ready or w_ready.
+//
+if(space_in_remote_client_read_buffer)
+    FD_SET(remote_client, &amp;r_ready);
+if(data_in_remote_client_write_buffer)
+    FD_SET(remote_client, &amp;w_ready);
+if(space_in_remote_server_read_buffer)
+    FD_SET(remote_server, &amp;r_ready);
+if(data_in_remote_server_write_buffer)
+    FD_SET(remote_server, &amp;w_ready);
+
+// select will block until at least one socket is ready.
+//
+if((n_ready = select(FD_SETSIZE, &amp;r_ready, &amp;w_ready, NULL, NULL)) &lt; 0)
+    pdie("select");
+
+// Loop over r_ready and w_ready to see which clients are ready for I/O
+// n_ready is set to the total number of reads and writes the sockets
+// are ready for, so we decrement it every time we find a ready socket,
+// and terminate the loop once we have handled all ready sockets.
+//
+for(fd = 0; n_ready > 0 &amp;&amp; fd &lt; FD_SETSIZE; ++fd) {
+    if(FD_ISSET(fd, &amp;r_ready)) {
+        --n_ready;
+
+        // do the read
+    }
+    if(FD_ISSET(fd, &amp;w_ready)) {
+        --n_ready;
+
+        // do the write
+    }
+}</pre>
+
+  <p>
+    poll can be a little more efficient in this case because we can
+    ask it to check only two file descriptors, instead of an entire
+    fd_set. The basic recipe is like this (again, use this for
+    inspiration, don't copy and paste it into your program):
+  </p>
+
+  <pre class="code">
+struct pollfd pollfds[2];
+pollfds[0].fd = remote_client;
+pollfds[0].events = pollfds[0].revents = 0;
+pollfds[1].fd = remote_server;
+pollfds[1].events = pollfds[1].revents = 0;
+
+// Set intent in the events member of each pollfd struct
+//
+if(space_in_remote_client_read_buffer)
+    pollfds[0].events |= POLLIN;
+if(data_in_remote_client_write_buffer)
+    pollfds[0].events |= POLLOUT;
+if(space_in_remote_server_read_buffer)
+    pollfds[1].events |= POLLIN;
+if(data_in_remote_server_write_buffer)
+    pollfds[1].events |= POLLOUT;
+
+if(poll(pollfds, 2, -1) < 0)
+    pdie("poll");
+
+// Read the ready state in the revents member of each pollfd struct
+//
+if(pollfds[0].revents &amp; POLLIN) {
+    // do the read from the remote client
+}
+if(pollfds[0].revents &amp; POLLOUT) {
+    // do the write to the remote client
+}
+if(pollfds[1].revents &amp; POLLIN) {
+    // do the read from the remote server
+}
+if(pollfds[1].revents &amp; POLLOUT) {
+    // do the write to th remote server
+}
+</pre>
+
+  <p>
+    You can probably think of more elegant ways to do either the
+    select or poll loops. Please do your best to design an elegant,
+    modular solution that avoids duplicating code and makes testing
+    easy. This is one of the most important practical skills to work
+    on as a systems developer.
+  </p>
+
+  <h2>Testing</h2>
+
+  <p>
+    Please remember to test you solution on one of the iMacs in the Vertica Lounge before you submit.
+  </p>
+
+  <p>
+    You should be able to access a web page through your proxy server. To
+    test this at the command line, invoke <span
+    class="command">tcpproxy</span> to proxy the Brandeis web
+    server:
+  </p>
+
+  <pre class="command">./tcpproxy www.brandeis.edu 80 8000</pre>
+
+  <p>
+    Then, in another terminal window, use telnet to request the
+    homepage (notice that we telnet to the proxy host and port, not
+    directly to theBrandeis web server):
+  </p>
+
+  <pre class="command">telnet localhost 8000
+Trying 127.0.0.1...
+Connected to localhost.
+Escape character is '^]'.
+GET /
+
+</pre>
+
+  <p>
+    You should also test with some binary data. An image is a good
+    choice. Keep your proxy running. Find an image on the CS
+    department homepage, maybe this one:
+  </p>
+
+  <pre class="code">http://www.cs.brandeis.edu/wp-content/themes/twentyten/images/headers/path.jpg</pre>
+
+  <p>
+    Then replace the hostname with &quot;localhost:8000&quot; to use
+    your TCP proxy server instead. Firefox should still be able to load the
+    image, but this time through your proxy instead of directly from
+    the department's web server.
+  </p>
+
+  <pre class="code">http://localhost:8000/wp-content/themes/twentyten/images/headers/path.jpg</pre>
+
+  <p>
+    Some websites may not work correctly if accessed using your web
+    browser through your TCP proxy server. This is because your web browser
+    puts the name of the server it is communicating with in HTTP
+    requests, and some web servers use that host name to figure out
+    which web site the client is accessing (servers that use this are
+    employing what's called named-based virtual hosts). You should at
+    least be able to read HTML files via HTTP/0.9 using telnet and
+    images by directly accessing them by filename in your web
+    browser.
+  </p>
+
+  <div id="footer">
+    2017 Brandeis University &#8212;
+    
+    cs146a Fundamentals of Computer Systems
+  </div>
+</body>
+</html>
